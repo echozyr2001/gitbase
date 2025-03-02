@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+mod coder;
+
 use octocrab::Octocrab;
 use serde_json::Value;
 use std::collections::HashMap;

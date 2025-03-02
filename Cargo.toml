@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# coder
 bech32 = "0.11.0"
+sha3 = "0.10.0"
+blake3 = "1.6.0"
 
 # error
 anyhow = "1.0.0"
