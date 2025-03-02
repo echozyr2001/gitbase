@@ -1,0 +1,22 @@
+[package]
+name = "gitbase"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# error
+anyhow = "1.0.0"
+error-stack = "0.5.0"
+
+# cli
+clap = { version = "4.5.31", features = ["derive"] }
+
+# structure
+serde = { version = "1.0.0", features = ["derive"] }
+serde_json = "1.0.0"
+
+# async
+tokio = { version = "1.43.0", features = ["full"] }
+
+# github
+octocrab = "0.43.0"
