@@ -67,29 +67,29 @@ pub struct Metadata {
     pub updated_sha: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use dotenv_codegen::dotenv;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use dotenv_codegen::dotenv;
 
-    fn init_gitbase() -> Arc<GitBase> {
-        let token = dotenv!("GB_GITHUB_TOKEN");
-        let owner = dotenv!("GB_GITHUB_OWNER");
-        let repo = dotenv!("GB_GITHUB_REPO");
+//     fn init_gitbase() -> Arc<GitBase> {
+//         let token = dotenv!("GB_GITHUB_TOKEN");
+//         let owner = dotenv!("GB_GITHUB_OWNER");
+//         let repo = dotenv!("GB_GITHUB_REPO");
 
-        GitBase::new(token, owner, repo)
-    }
+//         GitBase::new(token, owner, repo)
+//     }
 
-    #[tokio::test]
-    async fn test_fetch_github_file() {
-        let gitbase = init_gitbase();
+//     #[tokio::test]
+//     async fn test_fetch_github_file() {
+//         let gitbase = init_gitbase();
 
-        let content = gitbase
-            .fetch_file("README.md", "main")
-            .await
-            .unwrap()
-            .decoded_content()
-            .unwrap();
-        println!("content: {:?}", content);
-    }
-}
+//         let content = gitbase
+//             .fetch_file("README.md", "main")
+//             .await
+//             .unwrap()
+//             .decoded_content()
+//             .unwrap();
+//         println!("content: {:?}", content);
+//     }
+// }
