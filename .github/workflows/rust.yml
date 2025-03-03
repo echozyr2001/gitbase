@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  GB_GITHUB_TOKEN: ${{ secrets.GB_GITHUB_TOKEN }}
+  GB_GITHUB_OWNER: ${{ secrets.GB_GITHUB_OWNER }}
+  GB_GITHUB_REPO: ${{ secrets.GB_GITHUB_REPO }}
 
 jobs:
   build:
