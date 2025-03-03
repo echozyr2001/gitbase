@@ -73,9 +73,9 @@ mod tests {
     use dotenv_codegen::dotenv;
 
     fn init_gitbase() -> Arc<GitBase> {
-        let token = dotenv!("GITHUB_TOKEN");
-        let owner = dotenv!("GITHUB_OWNER");
-        let repo = dotenv!("GITHUB_REPO");
+        let token = dotenv!("GB_GITHUB_TOKEN");
+        let owner = dotenv!("GB_GITHUB_OWNER");
+        let repo = dotenv!("GB_GITHUB_REPO");
 
         GitBase::new(token, owner, repo)
     }
