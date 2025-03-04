@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 mod coder;
+mod error;
 
 use anyhow::Result;
 use lru::LruCache;

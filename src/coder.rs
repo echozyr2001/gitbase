@@ -1,53 +1,69 @@
-use anyhow::{Context, Result};
 use bech32::{decode, encode, Hrp};
+use error_stack::ResultExt;
 use sha3::{Digest, Sha3_256};
+
+use crate::error::Bech32Error;
 
 pub const DOC_PREFIX: &str = "gbdoc";
 pub const COL_PREFIX: &str = "gbcol";
 pub const IDX_PREFIX: &str = "gbidx";
 
-/// 计算 SHA256 哈希
+/// Compute SHA256 hash
 fn sha256_hash(input: &str) -> Vec<u8> {
     let mut hasher = Sha3_256::new();
     hasher.update(input);
     hasher.finalize().to_vec()
 }
 
-/// 计算 Blake3 哈希
+/// Compute Blake3 hash
 fn blake3_hash(input: &str) -> Vec<u8> {
     let mut hasher = blake3::Hasher::new();
     hasher.update(input.as_bytes());
-    hasher.finalize().as_bytes()[..10].to_vec() // 取前10字节，避免过长
+    hasher.finalize().as_bytes()[..10].to_vec() // Take the first 10 bytes to avoid excessive length
 }
 
-/// 生成 Bech32 ID
-fn generate_bech32_id(hrp: &str, data: &[u8]) -> Result<String> {
-    let hrp = Hrp::parse(hrp).context("valid hrp")?;
-    let encoded = encode::<bech32::Bech32m>(hrp, data).context("Failed to encode Bech32")?;
+/// Generate Bech32 ID
+fn generate_bech32_id(hrp: &str, data: &[u8]) -> error_stack::Result<String, Bech32Error> {
+    let hrp = Hrp::parse(hrp)
+        .change_context(Bech32Error::InvalidHRP)
+        .attach_printable("HRP parsing failed")?;
+
+    let encoded = encode::<bech32::Bech32m>(hrp, data)
+        .change_context_lazy(|| Bech32Error::EncodingError("encoding failed".to_string()))
+        .attach_printable("Bech32 encoding failed")?;
     Ok(encoded)
 }
 
-/// 生成文档 ID
-pub fn generate_document_id(content: &str, timestamp: u64) -> Result<String> {
+/// Generate document ID
+pub fn generate_document_id(
+    content: &str,
+    timestamp: u64,
+) -> error_stack::Result<String, Bech32Error> {
     let hash = sha256_hash(&format!("{}{}", content, timestamp));
-    generate_bech32_id(DOC_PREFIX, &hash[..10]) // 取前10字节
+    generate_bech32_id(DOC_PREFIX, &hash[..10]) // Take the first 10 bytes
 }
 
-/// 生成集合 ID
-pub fn generate_collection_id(collection_name: &str) -> Result<String> {
+/// Generate collection ID
+pub fn generate_collection_id(collection_name: &str) -> error_stack::Result<String, Bech32Error> {
     let hash = blake3_hash(collection_name);
     generate_bech32_id(COL_PREFIX, &hash)
 }
 
-/// 生成索引 ID
-pub fn generate_index_id(index_name: &str, collection_name: &str) -> Result<String> {
+/// Generate index ID
+pub fn generate_index_id(
+    index_name: &str,
+    collection_name: &str,
+) -> error_stack::Result<String, Bech32Error> {
     let hash = sha256_hash(&format!("{}{}", index_name, collection_name));
     generate_bech32_id(IDX_PREFIX, &hash[..10])
 }
 
-/// 解码 Bech32 ID
-pub fn decode_bech32_id(encoded: &str) -> Result<(String, Vec<u8>)> {
-    let (hrp, data) = decode(encoded).context("Failed to decode Bech32")?;
+/// Decode Bech32 ID
+pub fn decode_bech32_id(encoded: &str) -> error_stack::Result<(String, Vec<u8>), Bech32Error> {
+    let (hrp, data) = decode(encoded)
+        .change_context_lazy(|| Bech32Error::DecodingError("decoding failed".to_string()))
+        .attach_printable("Bech32 decoding failed")?;
+
     Ok((hrp.to_string(), data))
 }
 
