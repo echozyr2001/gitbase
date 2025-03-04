@@ -3,7 +3,7 @@
 mod coder;
 mod error;
 
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use lru::LruCache;
 use octocrab::models::repos::Content;
 use octocrab::Octocrab;
@@ -53,6 +53,42 @@ impl GitBase {
 
         Ok(content.clone())
     }
+
+    pub async fn create_collection(&self, name: &str, branch: &str) -> Result<()> {
+        let collection_id = coder::generate_collection_id(name).unwrap();
+        let dir_path = format!("collections/{}", name);
+
+        // 1. 在集合目录下创建 `.gitkeep` 文件，让 Git 识别目录
+        let gitkeep_path = format!("{}/.gitkeep", dir_path);
+        self.client
+            .repos(&self.owner, &self.repo)
+            .create_file(gitkeep_path, "Initialize collection directory", "")
+            .branch(branch)
+            .send()
+            .await?;
+
+        // 2. 在集合目录下创建 `collection.json`，存储唯一 ID
+        let metadata_path = format!("{}/collection.json", dir_path);
+        let metadata_content = serde_json::json!({
+            "name": name,
+            "collection_id": collection_id,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        })
+        .to_string();
+
+        self.client
+            .repos(&self.owner, &self.repo)
+            .create_file(
+                metadata_path,
+                "Store collection metadata",
+                &metadata_content,
+            )
+            .branch(branch)
+            .send()
+            .await?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -92,5 +128,12 @@ pub struct Metadata {
 //             .decoded_content()
 //             .unwrap();
 //         println!("content: {:?}", content);
+//     }
+
+//     #[tokio::test]
+//     async fn test_create_collection() {
+//         let gitbase = init_gitbase();
+
+//         gitbase.create_collection("notes", "main").await.unwrap();
 //     }
 // }
