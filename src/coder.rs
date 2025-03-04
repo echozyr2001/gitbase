@@ -2,7 +2,7 @@ use bech32::{decode, encode, Hrp};
 use error_stack::ResultExt;
 use sha3::{Digest, Sha3_256};
 
-use crate::error::Bech32Error;
+use crate::error::{Bech32Error, CoderResult};
 
 pub const DOC_PREFIX: &str = "gbdoc";
 pub const COL_PREFIX: &str = "gbcol";
@@ -23,7 +23,7 @@ fn blake3_hash(input: &str) -> Vec<u8> {
 }
 
 /// Generate Bech32 ID
-fn generate_bech32_id(hrp: &str, data: &[u8]) -> error_stack::Result<String, Bech32Error> {
+fn generate_bech32_id(hrp: &str, data: &[u8]) -> CoderResult<String> {
     let hrp = Hrp::parse(hrp)
         .change_context(Bech32Error::InvalidHRP)
         .attach_printable("HRP parsing failed")?;
@@ -35,31 +35,25 @@ fn generate_bech32_id(hrp: &str, data: &[u8]) -> error_stack::Result<String, Bec
 }
 
 /// Generate document ID
-pub fn generate_document_id(
-    content: &str,
-    timestamp: u64,
-) -> error_stack::Result<String, Bech32Error> {
+pub fn generate_document_id(content: &str, timestamp: u64) -> CoderResult<String> {
     let hash = sha256_hash(&format!("{}{}", content, timestamp));
     generate_bech32_id(DOC_PREFIX, &hash[..10]) // Take the first 10 bytes
 }
 
 /// Generate collection ID
-pub fn generate_collection_id(collection_name: &str) -> error_stack::Result<String, Bech32Error> {
+pub fn generate_collection_id(collection_name: &str) -> CoderResult<String> {
     let hash = blake3_hash(collection_name);
     generate_bech32_id(COL_PREFIX, &hash)
 }
 
 /// Generate index ID
-pub fn generate_index_id(
-    index_name: &str,
-    collection_name: &str,
-) -> error_stack::Result<String, Bech32Error> {
+pub fn generate_index_id(index_name: &str, collection_name: &str) -> CoderResult<String> {
     let hash = sha256_hash(&format!("{}{}", index_name, collection_name));
     generate_bech32_id(IDX_PREFIX, &hash[..10])
 }
 
 /// Decode Bech32 ID
-pub fn decode_bech32_id(encoded: &str) -> error_stack::Result<(String, Vec<u8>), Bech32Error> {
+pub fn decode_bech32_id(encoded: &str) -> CoderResult<(String, Vec<u8>)> {
     let (hrp, data) = decode(encoded)
         .change_context_lazy(|| Bech32Error::DecodingError("decoding failed".to_string()))
         .attach_printable("Bech32 decoding failed")?;

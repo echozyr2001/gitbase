@@ -23,3 +23,5 @@ pub enum Bech32Error {
     #[error("Ali API Error: {0}")]
     AliApiError(String),
 }
+
+pub type CoderResult<T> = error_stack::Result<T, Bech32Error>;
