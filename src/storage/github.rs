@@ -1,14 +1,15 @@
 use super::{FileMeta, StorageBackend};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
+use error_stack::Report;
 use octocrab::Octocrab;
 use std::fmt;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum GitHubStorageError {
-    #[error("GitHub API error: {0}")]
-    ApiError(#[from] octocrab::Error),
+    #[error("GitHub API error")]
+    ApiError,
 
     #[error("Missing data in response: {0}")]
     MissingData(String),
@@ -16,12 +17,14 @@ pub enum GitHubStorageError {
     #[error("Invalid path: {0}")]
     InvalidPath(String),
 
-    #[error("Authentication error: {0}")]
-    AuthError(String),
+    #[error("Authentication error")]
+    AuthError,
 
-    #[error("Encoding error: {0}")]
-    EncodingError(String),
+    #[error("Encoding error")]
+    EncodingError,
 }
+
+pub type GitHubStorageResult<T> = error_stack::Result<T, GitHubStorageError>;
 
 impl fmt::Display for GitHubStorage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -46,11 +49,13 @@ impl GitHubStorage {
         owner: &str,
         repo: &str,
         branch: Option<&str>,
-    ) -> Result<Self, GitHubStorageError> {
+    ) -> GitHubStorageResult<Self> {
         let client = Octocrab::builder()
             .personal_token(token.to_string())
             .build()
-            .map_err(|e| GitHubStorageError::AuthError(e.to_string()))?;
+            .map_err(|e| {
+                Report::new(GitHubStorageError::AuthError).attach_printable(e.to_string())
+            })?;
 
         Ok(GitHubStorage {
             client,
@@ -59,126 +64,141 @@ impl GitHubStorage {
             branch: branch.unwrap_or("main").to_string(),
         })
     }
+
+    async fn create_file(&self, path: &str, content: &str) -> GitHubStorageResult<FileMeta> {
+        let commit = self
+            .client
+            .repos(&self.owner, &self.repo)
+            .create_file(path, format!("Create {}", path), content)
+            .branch(&self.branch)
+            .send()
+            .await
+            .map_err(|e| {
+                Report::new(GitHubStorageError::ApiError)
+                    .attach_printable(format!("Failed to create file: {}", e))
+            })?;
+
+        // For new files, both created and modified are the same
+        let created = commit
+            .commit
+            .author
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing author data".into(),
+                ))
+            })?
+            .date
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing author date".into(),
+                ))
+            })?;
+
+        let modified = commit
+            .commit
+            .committer
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing committer data".into(),
+                ))
+            })?
+            .date
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing committer date".into(),
+                ))
+            })?;
+
+        Ok(FileMeta {
+            sha: commit.content.sha,
+            created,
+            modified,
+        })
+    }
 }
 
 #[async_trait]
 impl StorageBackend for GitHubStorage {
-    type Error = GitHubStorageError;
+    type Error = Report<GitHubStorageError>;
 
-    async fn write(&self, path: &str, content: &str) -> Result<FileMeta, Self::Error> {
+    async fn write(&self, path: &str, content: &str) -> GitHubStorageResult<FileMeta> {
         if path.is_empty() {
-            return Err(GitHubStorageError::InvalidPath(
+            return Err(Report::new(GitHubStorageError::InvalidPath(
                 "Path cannot be empty".into(),
-            ));
+            )));
         }
 
-        let get_result = self
+        // Try to get existing content, handle NotFound errors separately
+        let get_result = match self
             .client
             .repos(&self.owner, &self.repo)
             .get_content()
             .path(path)
             .r#ref(&self.branch)
             .send()
-            .await;
-
-        match get_result {
-            Ok(content_info) => {
-                // File exists, check if content has changed
-                let item = content_info.items.first().ok_or_else(|| {
-                    GitHubStorageError::MissingData("No content items found".into())
-                })?;
-
-                let sha = item.sha.clone();
-
-                // Check if content has changed by comparing with current content
-                if let Some(encoded_content) = &item.content {
-                    // GitHub API returns base64 encoded content with possible newlines
-                    let cleaned_encoded = encoded_content.replace("\n", "");
-
-                    // Decode the content
-                    let current_content = general_purpose::STANDARD
-                        .decode(&cleaned_encoded)
-                        .map_err(|e| GitHubStorageError::EncodingError(e.to_string()))?;
-
-                    let current_content_str = String::from_utf8(current_content)
-                        .map_err(|e| GitHubStorageError::EncodingError(e.to_string()))?;
-
-                    // If content hasn't changed, return early with existing metadata
-                    if current_content_str == content {
-                        // Get the creation date
-                        let commits = self
-                            .client
-                            .repos(&self.owner, &self.repo)
-                            .list_commits()
-                            .path(path)
-                            .per_page(1)
-                            .send()
-                            .await
-                            .map_err(GitHubStorageError::ApiError)?;
-
-                        let first_commit = commits.items.first().ok_or_else(|| {
-                            GitHubStorageError::MissingData(
-                                "No commit history found for file".into(),
-                            )
-                        })?;
-
-                        let created = first_commit
-                            .commit
-                            .author
-                            .as_ref()
-                            .ok_or_else(|| {
-                                GitHubStorageError::MissingData(
-                                    "Missing author data for original file".into(),
-                                )
-                            })?
-                            .date
-                            .ok_or_else(|| {
-                                GitHubStorageError::MissingData(
-                                    "Missing author date for original file".into(),
-                                )
-                            })?;
-
-                        // For modified date, we'll also use the latest commit date
-                        // since there's no last_modified field in Content
-                        let modified = first_commit
-                            .commit
-                            .committer
-                            .as_ref()
-                            .ok_or_else(|| {
-                                GitHubStorageError::MissingData(
-                                    "Missing committer data for file".into(),
-                                )
-                            })?
-                            .date
-                            .ok_or_else(|| {
-                                GitHubStorageError::MissingData(
-                                    "Missing committer date for file".into(),
-                                )
-                            })?;
-
-                        return Ok(FileMeta {
-                            sha: item.sha.clone(),
-                            created,
-                            modified,
-                        });
-                    }
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // If the file doesn't exist, create it
+                if e.to_string().contains("404") {
+                    // File doesn't exist, create it
+                    return self.create_file(path, content).await;
                 }
+                // Otherwise, propagate the error
+                Err(Report::new(GitHubStorageError::ApiError)
+                    .attach_printable(format!("Failed to get content: {}", e)))
+            }
+        }?;
 
-                // Content has changed, proceed with update
-                // Store the original creation date by getting the first commit for this file
+        // File exists, check if content has changed
+        let item = get_result.items.first().ok_or_else(|| {
+            Report::new(GitHubStorageError::MissingData(
+                "No content items found".into(),
+            ))
+        })?;
+
+        let sha = item.sha.clone();
+
+        // Check if content has changed by comparing with current content
+        if let Some(encoded_content) = &item.content {
+            // GitHub API returns base64 encoded content with possible newlines
+            let cleaned_encoded = encoded_content.replace("\n", "");
+
+            // Decode the content
+            let current_content =
+                general_purpose::STANDARD
+                    .decode(&cleaned_encoded)
+                    .map_err(|e| {
+                        Report::new(GitHubStorageError::EncodingError)
+                            .attach_printable(format!("Failed to decode content: {}", e))
+                    })?;
+
+            let current_content_str = String::from_utf8(current_content).map_err(|e| {
+                Report::new(GitHubStorageError::EncodingError)
+                    .attach_printable(format!("Failed to convert bytes to UTF-8: {}", e))
+            })?;
+
+            // If content hasn't changed, return early with existing metadata
+            if current_content_str == content {
+                // Get the creation date
                 let commits = self
                     .client
                     .repos(&self.owner, &self.repo)
                     .list_commits()
                     .path(path)
-                    .per_page(1) // We only need the first commit
+                    .per_page(1)
                     .send()
                     .await
-                    .map_err(GitHubStorageError::ApiError)?;
+                    .map_err(|e| {
+                        Report::new(GitHubStorageError::ApiError)
+                            .attach_printable(format!("Failed to list commits: {}", e))
+                    })?;
 
-                // Get the first (earliest) commit for this file
                 let first_commit = commits.items.first().ok_or_else(|| {
-                    GitHubStorageError::MissingData("No commit history found for file".into())
+                    Report::new(GitHubStorageError::MissingData(
+                        "No commit history found for file".into(),
+                    ))
                 })?;
 
                 let created = first_commit
@@ -186,78 +206,112 @@ impl StorageBackend for GitHubStorage {
                     .author
                     .as_ref()
                     .ok_or_else(|| {
-                        GitHubStorageError::MissingData(
+                        Report::new(GitHubStorageError::MissingData(
                             "Missing author data for original file".into(),
-                        )
+                        ))
                     })?
                     .date
                     .ok_or_else(|| {
-                        GitHubStorageError::MissingData(
+                        Report::new(GitHubStorageError::MissingData(
                             "Missing author date for original file".into(),
-                        )
+                        ))
                     })?;
 
-                let commit = self
-                    .client
-                    .repos(&self.owner, &self.repo)
-                    .update_file(path, format!("Update {}", path), content, &sha)
-                    .branch(&self.branch)
-                    .send()
-                    .await?;
-
-                let modified = commit
+                // For modified date, use the latest commit date
+                let modified = first_commit
                     .commit
                     .committer
+                    .as_ref()
                     .ok_or_else(|| {
-                        GitHubStorageError::MissingData("Missing committer data".into())
+                        Report::new(GitHubStorageError::MissingData(
+                            "Missing committer data for file".into(),
+                        ))
                     })?
                     .date
                     .ok_or_else(|| {
-                        GitHubStorageError::MissingData("Missing committer date".into())
+                        Report::new(GitHubStorageError::MissingData(
+                            "Missing committer date for file".into(),
+                        ))
                     })?;
 
-                Ok(FileMeta {
-                    sha: commit.content.sha,
-                    created,  // Use the original creation date
-                    modified, // Use the new modification date
-                })
-            }
-            Err(_) => {
-                // File doesn't exist, create it
-                let commit = self
-                    .client
-                    .repos(&self.owner, &self.repo)
-                    .create_file(path, format!("Create {}", path), content)
-                    .branch(&self.branch)
-                    .send()
-                    .await?;
-
-                // For new files, both created and modified are the same
-                let created = commit
-                    .commit
-                    .author
-                    .ok_or_else(|| GitHubStorageError::MissingData("Missing author data".into()))?
-                    .date
-                    .ok_or_else(|| GitHubStorageError::MissingData("Missing author date".into()))?;
-
-                let modified = commit
-                    .commit
-                    .committer
-                    .ok_or_else(|| {
-                        GitHubStorageError::MissingData("Missing committer data".into())
-                    })?
-                    .date
-                    .ok_or_else(|| {
-                        GitHubStorageError::MissingData("Missing committer date".into())
-                    })?;
-
-                Ok(FileMeta {
-                    sha: commit.content.sha,
+                return Ok(FileMeta {
+                    sha: item.sha.clone(),
                     created,
                     modified,
-                })
+                });
             }
         }
+
+        // Content has changed, proceed with update
+        // First get the original creation date
+        let commits = self
+            .client
+            .repos(&self.owner, &self.repo)
+            .list_commits()
+            .path(path)
+            .per_page(1)
+            .send()
+            .await
+            .map_err(|e| {
+                Report::new(GitHubStorageError::ApiError)
+                    .attach_printable(format!("Failed to list commits: {}", e))
+            })?;
+
+        let first_commit = commits.items.first().ok_or_else(|| {
+            Report::new(GitHubStorageError::MissingData(
+                "No commit history found for file".into(),
+            ))
+        })?;
+
+        let created = first_commit
+            .commit
+            .author
+            .as_ref()
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing author data for original file".into(),
+                ))
+            })?
+            .date
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing author date for original file".into(),
+                ))
+            })?;
+
+        // Update the file
+        let commit = self
+            .client
+            .repos(&self.owner, &self.repo)
+            .update_file(path, format!("Update {}", path), content, &sha)
+            .branch(&self.branch)
+            .send()
+            .await
+            .map_err(|e| {
+                Report::new(GitHubStorageError::ApiError)
+                    .attach_printable(format!("Failed to update file: {}", e))
+            })?;
+
+        let modified = commit
+            .commit
+            .committer
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing committer data".into(),
+                ))
+            })?
+            .date
+            .ok_or_else(|| {
+                Report::new(GitHubStorageError::MissingData(
+                    "Missing committer date".into(),
+                ))
+            })?;
+
+        Ok(FileMeta {
+            sha: commit.content.sha,
+            created,
+            modified,
+        })
     }
 }
 
