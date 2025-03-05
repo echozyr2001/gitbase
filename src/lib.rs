@@ -2,6 +2,7 @@
 
 mod coder;
 mod error;
+mod storage;
 
 use anyhow::{Ok, Result};
 use lru::LruCache;

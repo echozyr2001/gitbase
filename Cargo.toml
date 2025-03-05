@@ -8,6 +8,7 @@ edition = "2021"
 bech32 = "0.11.0"
 sha3 = "0.10.0"
 blake3 = "1.6.0"
+base64 = "0.22.0"
 
 # error
 anyhow = "1.0.0"
@@ -23,6 +24,7 @@ serde_json = "1.0.0"
 
 # async
 tokio = { version = "1.43.0", features = ["full"] }
+async-trait = "0.1.0"
 
 # github
 octocrab = "0.43.0"
