@@ -1,6 +1,33 @@
 use super::{FileMeta, StorageBackend};
 use async_trait::async_trait;
 use octocrab::Octocrab;
+use std::fmt;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum GitHubStorageError {
+    #[error("GitHub API error: {0}")]
+    ApiError(#[from] octocrab::Error),
+
+    #[error("Missing data in response: {0}")]
+    MissingData(String),
+
+    #[error("Invalid path: {0}")]
+    InvalidPath(String),
+
+    #[error("Authentication error: {0}")]
+    AuthError(String),
+}
+
+impl fmt::Display for GitHubStorage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "GitHubStorage(owner={}, repo={}, branch={})",
+            self.owner, self.repo, self.branch
+        )
+    }
+}
 
 pub struct GitHubStorage {
     client: Octocrab,
@@ -10,26 +37,37 @@ pub struct GitHubStorage {
 }
 
 impl GitHubStorage {
-    pub fn new(token: &str, owner: &str, repo: &str, branch: Option<&str>) -> Self {
+    pub fn new(
+        token: &str,
+        owner: &str,
+        repo: &str,
+        branch: Option<&str>,
+    ) -> Result<Self, GitHubStorageError> {
         let client = Octocrab::builder()
             .personal_token(token.to_string())
             .build()
-            .unwrap();
+            .map_err(|e| GitHubStorageError::AuthError(e.to_string()))?;
 
-        GitHubStorage {
+        Ok(GitHubStorage {
             client,
             owner: owner.to_string(),
             repo: repo.to_string(),
             branch: branch.unwrap_or("main").to_string(),
-        }
+        })
     }
 }
 
 #[async_trait]
 impl StorageBackend for GitHubStorage {
-    type Error = octocrab::Error; // Add associated error type
+    type Error = GitHubStorageError;
 
     async fn write(&self, path: &str, content: &str) -> Result<FileMeta, Self::Error> {
+        if path.is_empty() {
+            return Err(GitHubStorageError::InvalidPath(
+                "Path cannot be empty".into(),
+            ));
+        }
+
         let get_result = self
             .client
             .repos(&self.owner, &self.repo)
@@ -41,8 +79,45 @@ impl StorageBackend for GitHubStorage {
 
         match get_result {
             Ok(content_info) => {
-                // 文件存在，执行更新操作
-                let sha = content_info.items[0].sha.clone();
+                // File exists, update it
+                let item = content_info.items.first().ok_or_else(|| {
+                    GitHubStorageError::MissingData("No content items found".into())
+                })?;
+
+                let sha = item.sha.clone();
+
+                // Store the original creation date by getting the first commit for this file
+                let commits = self
+                    .client
+                    .repos(&self.owner, &self.repo)
+                    .list_commits()
+                    .path(path)
+                    .per_page(1) // We only need the first commit
+                    .send()
+                    .await
+                    .map_err(GitHubStorageError::ApiError)?;
+
+                // Get the first (earliest) commit for this file
+                let first_commit = commits.items.first().ok_or_else(|| {
+                    GitHubStorageError::MissingData("No commit history found for file".into())
+                })?;
+
+                let created = first_commit
+                    .commit
+                    .author
+                    .as_ref()
+                    .ok_or_else(|| {
+                        GitHubStorageError::MissingData(
+                            "Missing author data for original file".into(),
+                        )
+                    })?
+                    .date
+                    .ok_or_else(|| {
+                        GitHubStorageError::MissingData(
+                            "Missing author date for original file".into(),
+                        )
+                    })?;
+
                 let commit = self
                     .client
                     .repos(&self.owner, &self.repo)
@@ -51,14 +126,25 @@ impl StorageBackend for GitHubStorage {
                     .send()
                     .await?;
 
+                let modified = commit
+                    .commit
+                    .committer
+                    .ok_or_else(|| {
+                        GitHubStorageError::MissingData("Missing committer data".into())
+                    })?
+                    .date
+                    .ok_or_else(|| {
+                        GitHubStorageError::MissingData("Missing committer date".into())
+                    })?;
+
                 Ok(FileMeta {
                     sha: commit.content.sha,
-                    created: commit.commit.author.unwrap().date.unwrap(),
-                    modified: commit.commit.committer.unwrap().date.unwrap(),
+                    created,  // Use the original creation date
+                    modified, // Use the new modification date
                 })
             }
             Err(_) => {
-                // 文件不存在，执行创建操作
+                // File doesn't exist, create it
                 let commit = self
                     .client
                     .repos(&self.owner, &self.repo)
@@ -67,35 +153,57 @@ impl StorageBackend for GitHubStorage {
                     .send()
                     .await?;
 
+                // For new files, both created and modified are the same
+                let created = commit
+                    .commit
+                    .author
+                    .ok_or_else(|| GitHubStorageError::MissingData("Missing author data".into()))?
+                    .date
+                    .ok_or_else(|| GitHubStorageError::MissingData("Missing author date".into()))?;
+
+                let modified = commit
+                    .commit
+                    .committer
+                    .ok_or_else(|| {
+                        GitHubStorageError::MissingData("Missing committer data".into())
+                    })?
+                    .date
+                    .ok_or_else(|| {
+                        GitHubStorageError::MissingData("Missing committer date".into())
+                    })?;
+
                 Ok(FileMeta {
                     sha: commit.content.sha,
-                    created: commit.commit.author.unwrap().date.unwrap(),
-                    modified: commit.commit.committer.unwrap().date.unwrap(),
+                    created,
+                    modified,
                 })
             }
         }
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use dotenv_codegen::dotenv;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dotenv_codegen::dotenv;
 
-//     fn init_gitbase() -> GitHubStorage {
-//         let token = dotenv!("GB_GITHUB_TOKEN");
-//         let owner = dotenv!("GB_GITHUB_OWNER");
-//         let repo = dotenv!("GB_GITHUB_REPO");
+    fn init_gitbase() -> Result<GitHubStorage, GitHubStorageError> {
+        let token = dotenv!("GB_GITHUB_TOKEN");
+        let owner = dotenv!("GB_GITHUB_OWNER");
+        let repo = dotenv!("GB_GITHUB_REPO");
 
-//         GitHubStorage::new(token, owner, repo, Some("main"))
-//     }
+        GitHubStorage::new(token, owner, repo, Some("main"))
+    }
 
-//     #[tokio::test]
-//     async fn test_write_file() {
-//         let gitbase = init_gitbase();
+    #[tokio::test]
+    async fn test_write_file() {
+        let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
 
-//         let content = "Hello, world!";
-//         let meta = gitbase.write("test.txt", content).await.unwrap();
-//         println!("meta: {:?}", meta);
-//     }
-// }
+        let content = "Hello, world!";
+        let result = gitbase.write("test.txt", content).await;
+        match result {
+            Ok(meta) => println!("meta: {:?}", meta),
+            Err(e) => panic!("Error writing file: {}", e),
+        }
+    }
+}
