@@ -3,6 +3,8 @@ mod github;
 use async_trait::async_trait;
 use chrono::DateTime;
 
+use crate::error::StorageResult;
+
 #[derive(Debug)]
 pub struct FileMeta {
     pub sha: String,
@@ -12,7 +14,5 @@ pub struct FileMeta {
 
 #[async_trait]
 pub trait StorageBackend {
-    type Error;
-
-    async fn write(&self, path: &str, content: &str) -> Result<FileMeta, Self::Error>;
+    async fn write(&self, path: &str, content: &str) -> StorageResult<FileMeta>;
 }

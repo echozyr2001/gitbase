@@ -1,30 +1,11 @@
+use crate::error::{GitHubStorageError, GitHubStorageResult, StorageError, StorageResult};
+
 use super::{FileMeta, StorageBackend};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use error_stack::Report;
 use octocrab::Octocrab;
 use std::fmt;
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum GitHubStorageError {
-    #[error("GitHub API error")]
-    ApiError,
-
-    #[error("Missing data in response: {0}")]
-    MissingData(String),
-
-    #[error("Invalid path: {0}")]
-    InvalidPath(String),
-
-    #[error("Authentication error")]
-    AuthError,
-
-    #[error("Encoding error")]
-    EncodingError,
-}
-
-pub type GitHubStorageResult<T> = error_stack::Result<T, GitHubStorageError>;
 
 impl fmt::Display for GitHubStorage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -65,7 +46,7 @@ impl GitHubStorage {
         })
     }
 
-    async fn create_file(&self, path: &str, content: &str) -> GitHubStorageResult<FileMeta> {
+    async fn create_file(&self, path: &str, content: &str) -> StorageResult<FileMeta> {
         let commit = self
             .client
             .repos(&self.owner, &self.repo)
@@ -74,7 +55,7 @@ impl GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(GitHubStorageError::ApiError)
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
                     .attach_printable(format!("Failed to create file: {}", e))
             })?;
 
@@ -83,30 +64,30 @@ impl GitHubStorage {
             .commit
             .author
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing author data".into(),
-                ))
+                )))
             })?
             .date
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing author date".into(),
-                ))
+                )))
             })?;
 
         let modified = commit
             .commit
             .committer
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing committer data".into(),
-                ))
+                )))
             })?
             .date
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing committer date".into(),
-                ))
+                )))
             })?;
 
         Ok(FileMeta {
@@ -119,11 +100,9 @@ impl GitHubStorage {
 
 #[async_trait]
 impl StorageBackend for GitHubStorage {
-    type Error = Report<GitHubStorageError>;
-
-    async fn write(&self, path: &str, content: &str) -> GitHubStorageResult<FileMeta> {
+    async fn write(&self, path: &str, content: &str) -> StorageResult<FileMeta> {
         if path.is_empty() {
-            return Err(Report::new(GitHubStorageError::InvalidPath(
+            return Err(Report::new(StorageError::InvalidPath(
                 "Path cannot be empty".into(),
             )));
         }
@@ -146,16 +125,18 @@ impl StorageBackend for GitHubStorage {
                     return self.create_file(path, content).await;
                 }
                 // Otherwise, propagate the error
-                Err(Report::new(GitHubStorageError::ApiError)
-                    .attach_printable(format!("Failed to get content: {}", e)))
+                Err(
+                    Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
+                        .attach_printable(format!("Failed to get content: {}", e)),
+                )
             }
         }?;
 
         // File exists, check if content has changed
         let item = get_result.items.first().ok_or_else(|| {
-            Report::new(GitHubStorageError::MissingData(
+            Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                 "No content items found".into(),
-            ))
+            )))
         })?;
 
         let sha = item.sha.clone();
@@ -170,12 +151,12 @@ impl StorageBackend for GitHubStorage {
                 general_purpose::STANDARD
                     .decode(&cleaned_encoded)
                     .map_err(|e| {
-                        Report::new(GitHubStorageError::EncodingError)
+                        Report::new(StorageError::GitHub(GitHubStorageError::EncodingError))
                             .attach_printable(format!("Failed to decode content: {}", e))
                     })?;
 
             let current_content_str = String::from_utf8(current_content).map_err(|e| {
-                Report::new(GitHubStorageError::EncodingError)
+                Report::new(StorageError::GitHub(GitHubStorageError::EncodingError))
                     .attach_printable(format!("Failed to convert bytes to UTF-8: {}", e))
             })?;
 
@@ -191,14 +172,14 @@ impl StorageBackend for GitHubStorage {
                     .send()
                     .await
                     .map_err(|e| {
-                        Report::new(GitHubStorageError::ApiError)
+                        Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
                             .attach_printable(format!("Failed to list commits: {}", e))
                     })?;
 
                 let first_commit = commits.items.first().ok_or_else(|| {
-                    Report::new(GitHubStorageError::MissingData(
+                    Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                         "No commit history found for file".into(),
-                    ))
+                    )))
                 })?;
 
                 let created = first_commit
@@ -206,15 +187,15 @@ impl StorageBackend for GitHubStorage {
                     .author
                     .as_ref()
                     .ok_or_else(|| {
-                        Report::new(GitHubStorageError::MissingData(
+                        Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                             "Missing author data for original file".into(),
-                        ))
+                        )))
                     })?
                     .date
                     .ok_or_else(|| {
-                        Report::new(GitHubStorageError::MissingData(
+                        Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                             "Missing author date for original file".into(),
-                        ))
+                        )))
                     })?;
 
                 // For modified date, use the latest commit date
@@ -223,15 +204,15 @@ impl StorageBackend for GitHubStorage {
                     .committer
                     .as_ref()
                     .ok_or_else(|| {
-                        Report::new(GitHubStorageError::MissingData(
+                        Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                             "Missing committer data for file".into(),
-                        ))
+                        )))
                     })?
                     .date
                     .ok_or_else(|| {
-                        Report::new(GitHubStorageError::MissingData(
+                        Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                             "Missing committer date for file".into(),
-                        ))
+                        )))
                     })?;
 
                 return Ok(FileMeta {
@@ -253,14 +234,14 @@ impl StorageBackend for GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(GitHubStorageError::ApiError)
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
                     .attach_printable(format!("Failed to list commits: {}", e))
             })?;
 
         let first_commit = commits.items.first().ok_or_else(|| {
-            Report::new(GitHubStorageError::MissingData(
+            Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                 "No commit history found for file".into(),
-            ))
+            )))
         })?;
 
         let created = first_commit
@@ -268,15 +249,15 @@ impl StorageBackend for GitHubStorage {
             .author
             .as_ref()
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing author data for original file".into(),
-                ))
+                )))
             })?
             .date
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing author date for original file".into(),
-                ))
+                )))
             })?;
 
         // Update the file
@@ -288,7 +269,7 @@ impl StorageBackend for GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(GitHubStorageError::ApiError)
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
                     .attach_printable(format!("Failed to update file: {}", e))
             })?;
 
@@ -296,15 +277,15 @@ impl StorageBackend for GitHubStorage {
             .commit
             .committer
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing committer data".into(),
-                ))
+                )))
             })?
             .date
             .ok_or_else(|| {
-                Report::new(GitHubStorageError::MissingData(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
                     "Missing committer date".into(),
-                ))
+                )))
             })?;
 
         Ok(FileMeta {

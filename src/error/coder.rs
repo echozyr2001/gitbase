@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum Bech32Error {
+pub enum CoderError {
     #[error("Invalid HRP format")]
     InvalidHRP,
 
@@ -23,5 +23,3 @@ pub enum Bech32Error {
     #[error("Ali API Error: {0}")]
     AliApiError(String),
 }
-
-pub type CoderResult<T> = error_stack::Result<T, Bech32Error>;

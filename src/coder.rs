@@ -2,7 +2,7 @@ use bech32::{decode, encode, Hrp};
 use error_stack::ResultExt;
 use sha3::{Digest, Sha3_256};
 
-use crate::error::{Bech32Error, CoderResult};
+use crate::error::{CoderError, CoderResult};
 
 pub const DOC_PREFIX: &str = "gbdoc";
 pub const COL_PREFIX: &str = "gbcol";
@@ -25,11 +25,11 @@ fn blake3_hash(input: &str) -> Vec<u8> {
 /// Generate Bech32 ID
 fn generate_bech32_id(hrp: &str, data: &[u8]) -> CoderResult<String> {
     let hrp = Hrp::parse(hrp)
-        .change_context(Bech32Error::InvalidHRP)
+        .change_context(CoderError::InvalidHRP)
         .attach_printable("HRP parsing failed")?;
 
     let encoded = encode::<bech32::Bech32m>(hrp, data)
-        .change_context_lazy(|| Bech32Error::EncodingError("encoding failed".to_string()))
+        .change_context_lazy(|| CoderError::EncodingError("encoding failed".to_string()))
         .attach_printable("Bech32 encoding failed")?;
     Ok(encoded)
 }
@@ -55,7 +55,7 @@ pub fn generate_index_id(index_name: &str, collection_name: &str) -> CoderResult
 /// Decode Bech32 ID
 pub fn decode_bech32_id(encoded: &str) -> CoderResult<(String, Vec<u8>)> {
     let (hrp, data) = decode(encoded)
-        .change_context_lazy(|| Bech32Error::DecodingError("decoding failed".to_string()))
+        .change_context_lazy(|| CoderError::DecodingError("decoding failed".to_string()))
         .attach_printable("Bech32 decoding failed")?;
 
     Ok((hrp.to_string(), data))
