@@ -1,8 +1,10 @@
+mod cache;
 mod coder;
 mod storage;
 
 use thiserror::Error;
 
+pub use cache::CacheError;
 pub use coder::CoderError;
 pub use storage::{GitHubStorageError, StorageError};
 
@@ -24,6 +26,7 @@ pub enum GBError {
     Other(String),
 }
 
+pub type CacheResult<T> = Result<T, CacheError>;
 pub type AppResult<T> = error_stack::Result<T, GBError>;
 pub type CoderResult<T> = error_stack::Result<T, CoderError>;
 pub type StorageResult<T> = error_stack::Result<T, StorageError>;
