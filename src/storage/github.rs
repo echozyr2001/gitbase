@@ -342,6 +342,40 @@ impl StorageBackend for GitHubStorage {
             )
         }
     }
+
+    async fn delete(&self, path: &str) -> StorageResult<()> {
+        let get_result = self
+            .client
+            .repos(&self.owner, &self.repo)
+            .get_content()
+            .path(path)
+            .r#ref(&self.branch)
+            .send()
+            .await
+            .map_err(|e| {
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
+                    .attach_printable(format!("Failed to get content: {}", e))
+            })?;
+
+        let item = get_result.items.first().ok_or_else(|| {
+            Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
+                "No content items found".into(),
+            )))
+        })?;
+
+        self.client
+            .repos(&self.owner, &self.repo)
+            .delete_file(path, format!("Delete {}", path), &item.sha)
+            .branch(&self.branch)
+            .send()
+            .await
+            .map_err(|e| {
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
+                    .attach_printable(format!("Failed to delete file: {}", e))
+            })?;
+
+        Ok(())
+    }
 }
 
 // #[cfg(test)]
@@ -377,6 +411,17 @@ impl StorageBackend for GitHubStorage {
 //         match result {
 //             Ok(content) => println!("content: {}", content),
 //             Err(e) => panic!("Error reading file: {}", e),
+//         }
+//     }
+
+//     #[tokio::test]
+//     async fn test_delete_file() {
+//         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
+
+//         let result = gitbase.delete("test.txt").await;
+//         match result {
+//             Ok(_) => println!("File deleted"),
+//             Err(e) => panic!("Error deleting file: {}", e),
 //         }
 //     }
 // }
