@@ -15,4 +15,6 @@ pub struct FileMeta {
 #[async_trait]
 pub trait StorageBackend {
     async fn write(&self, path: &str, content: &str) -> StorageResult<FileMeta>;
+
+    async fn read(&self, path: &str) -> StorageResult<String>;
 }

@@ -294,6 +294,54 @@ impl StorageBackend for GitHubStorage {
             modified,
         })
     }
+
+    async fn read(&self, path: &str) -> StorageResult<String> {
+        let get_result = self
+            .client
+            .repos(&self.owner, &self.repo)
+            .get_content()
+            .path(path)
+            .r#ref(&self.branch)
+            .send()
+            .await
+            .map_err(|e| {
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
+                    .attach_printable(format!("Failed to get content: {}", e))
+            })?;
+
+        let item = get_result.items.first().ok_or_else(|| {
+            Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
+                "No content items found".into(),
+            )))
+        })?;
+
+        if let Some(encoded_content) = &item.content {
+            // GitHub API returns base64 encoded content with possible newlines
+            let cleaned_encoded = encoded_content.replace("\n", "");
+
+            // Decode the content
+            let content = general_purpose::STANDARD
+                .decode(&cleaned_encoded)
+                .map_err(|e| {
+                    Report::new(StorageError::GitHub(GitHubStorageError::EncodingError))
+                        .attach_printable(format!("Failed to decode content: {}", e))
+                })?;
+
+            let content_str = String::from_utf8(content).map_err(|e| {
+                Report::new(StorageError::GitHub(GitHubStorageError::EncodingError))
+                    .attach_printable(format!("Failed to convert bytes to UTF-8: {}", e))
+            })?;
+
+            Ok(content_str)
+        } else {
+            Err(
+                Report::new(StorageError::GitHub(GitHubStorageError::MissingData(
+                    "No content found".into(),
+                )))
+                .attach_printable(format!("No content found for path: {}", path)),
+            )
+        }
+    }
 }
 
 // #[cfg(test)]
@@ -301,7 +349,7 @@ impl StorageBackend for GitHubStorage {
 //     use super::*;
 //     use dotenv_codegen::dotenv;
 
-//     fn init_gitbase() -> Result<GitHubStorage, GitHubStorageError> {
+//     fn init_gitbase() -> GitHubStorageResult<GitHubStorage> {
 //         let token = dotenv!("GB_GITHUB_TOKEN");
 //         let owner = dotenv!("GB_GITHUB_OWNER");
 //         let repo = dotenv!("GB_GITHUB_REPO");
@@ -318,6 +366,17 @@ impl StorageBackend for GitHubStorage {
 //         match result {
 //             Ok(meta) => println!("meta: {:?}", meta),
 //             Err(e) => panic!("Error writing file: {}", e),
+//         }
+//     }
+
+//     #[tokio::test]
+//     async fn test_read_file() {
+//         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
+
+//         let result = gitbase.read("test.txt").await;
+//         match result {
+//             Ok(content) => println!("content: {}", content),
+//             Err(e) => panic!("Error reading file: {}", e),
 //         }
 //     }
 // }
