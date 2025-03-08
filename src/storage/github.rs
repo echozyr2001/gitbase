@@ -392,6 +392,18 @@ impl StorageBackend for GitHubStorage {
 //     }
 
 //     #[tokio::test]
+//     async fn test_create_file() {
+//         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
+
+//         let content = "Hello, world!";
+//         let result = gitbase.create_file("test.txt", content).await;
+//         match result {
+//             Ok(meta) => println!("meta: {:?}", meta),
+//             Err(e) => panic!("Error creating file: {}", e),
+//         }
+//     }
+
+//     #[tokio::test]
 //     async fn test_write_file() {
 //         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
 
