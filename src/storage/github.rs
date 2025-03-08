@@ -119,12 +119,13 @@ impl StorageBackend for GitHubStorage {
         {
             Ok(result) => Ok(result),
             Err(e) => {
-                // If the file doesn't exist, create it
-                if e.to_string().contains("404") {
-                    // File doesn't exist, create it
-                    return self.create_file(path, content).await;
+                if let octocrab::Error::GitHub { source, .. } = &e {
+                    if source.status_code == http::StatusCode::NOT_FOUND {
+                        // 文件不存在，创建它
+                        return self.create_file(path, content).await;
+                    }
                 }
-                // Otherwise, propagate the error
+                // 对于其他错误，附加上下文并传播
                 Err(
                     Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
                         .attach_printable(format!("Failed to get content: {}", e)),
@@ -305,8 +306,18 @@ impl StorageBackend for GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                    .attach_printable(format!("Failed to get content: {}", e))
+                // 直接使用模式匹配检查错误
+                let storage_error = if let octocrab::Error::GitHub { source, .. } = &e {
+                    if source.status_code == http::StatusCode::NOT_FOUND {
+                        StorageError::NotFound(format!("File not found: {}", path))
+                    } else {
+                        StorageError::GitHub(GitHubStorageError::ApiError)
+                    }
+                } else {
+                    StorageError::GitHub(GitHubStorageError::ApiError)
+                };
+
+                Report::new(storage_error).attach_printable(format!("Failed to get content: {}", e))
             })?;
 
         let item = get_result.items.first().ok_or_else(|| {

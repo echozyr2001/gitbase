@@ -546,6 +546,7 @@ dependencies = [
  "clap",
  "dotenv_codegen",
  "error-stack",
+ "http",
  "lru",
  "octocrab",
  "serde",
