@@ -364,8 +364,17 @@ impl StorageBackend for GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                    .attach_printable(format!("Failed to get content: {}", e))
+                let storage_error = if let octocrab::Error::GitHub { source, .. } = &e {
+                    if source.status_code == http::StatusCode::NOT_FOUND {
+                        StorageError::NotFound(format!("File not found: {}", path))
+                    } else {
+                        StorageError::GitHub(GitHubStorageError::ApiError)
+                    }
+                } else {
+                    StorageError::GitHub(GitHubStorageError::ApiError)
+                };
+
+                Report::new(storage_error).attach_printable(format!("Failed to get content: {}", e))
             })?;
 
         let item = get_result.items.first().ok_or_else(|| {
