@@ -16,12 +16,15 @@ pub enum StorageError {
 
     #[error("Rate limit exceeded")]
     RateLimitExceeded,
+
+    #[error("I/O error: {0}")]
+    IoError(String),
 }
 
 #[derive(Error, Debug)]
 pub enum GitHubStorageError {
-    #[error("GitHub API error")]
-    ApiError,
+    #[error("GitHub API error: {0}")]
+    ApiError(String),
 
     #[error("Missing data in response: {0}")]
     MissingData(String),
@@ -32,7 +35,6 @@ pub enum GitHubStorageError {
     #[error("Encoding error")]
     EncodingError,
 
-    // Add specific GitHub status code errors
     #[error("Resource not found")]
     NotFound,
 
@@ -51,14 +53,18 @@ impl From<octocrab::Error> for GitHubStorageError {
                 http::StatusCode::FORBIDDEN => GitHubStorageError::Forbidden,
                 http::StatusCode::UNAUTHORIZED => GitHubStorageError::AuthError,
                 http::StatusCode::TOO_MANY_REQUESTS => GitHubStorageError::RateLimitExceeded,
-                _ => GitHubStorageError::ApiError,
+                _ => GitHubStorageError::ApiError(format!("Status code: {}", source.status_code)),
             },
-            // Map other error variants
-            octocrab::Error::InvalidHeaderValue { .. } => GitHubStorageError::ApiError,
-            octocrab::Error::Http { .. } => GitHubStorageError::ApiError,
-            octocrab::Error::Hyper { .. } => GitHubStorageError::ApiError,
-            // Add other mappings as needed
-            _ => GitHubStorageError::ApiError,
+            octocrab::Error::InvalidHeaderValue { .. } => {
+                GitHubStorageError::ApiError("Invalid header value".into())
+            }
+            octocrab::Error::Http { source, .. } => {
+                GitHubStorageError::ApiError(format!("HTTP error: {}", source))
+            }
+            octocrab::Error::Hyper { source, .. } => {
+                GitHubStorageError::ApiError(format!("Hyper error: {}", source))
+            }
+            _ => GitHubStorageError::ApiError(format!("Unknown error: {}", err)),
         }
     }
 }

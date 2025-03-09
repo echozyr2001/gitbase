@@ -55,8 +55,10 @@ impl GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                    .attach_printable(format!("Failed to create file: {}", e))
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError(
+                    "API error".into(),
+                )))
+                .attach_printable(format!("Failed to create file: {}", e))
             })?;
 
         // For new files, both created and modified are the same
@@ -127,8 +129,10 @@ impl StorageBackend for GitHubStorage {
                 }
                 // 对于其他错误，附加上下文并传播
                 Err(
-                    Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                        .attach_printable(format!("Failed to get content: {}", e)),
+                    Report::new(StorageError::GitHub(GitHubStorageError::ApiError(
+                        "API error".into(),
+                    )))
+                    .attach_printable(format!("Failed to get content: {}", e)),
                 )
             }
         }?;
@@ -173,8 +177,10 @@ impl StorageBackend for GitHubStorage {
                     .send()
                     .await
                     .map_err(|e| {
-                        Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                            .attach_printable(format!("Failed to list commits: {}", e))
+                        Report::new(StorageError::GitHub(GitHubStorageError::ApiError(
+                            "API error".into(),
+                        )))
+                        .attach_printable(format!("Failed to list commits: {}", e))
                     })?;
 
                 let first_commit = commits.items.first().ok_or_else(|| {
@@ -235,8 +241,10 @@ impl StorageBackend for GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                    .attach_printable(format!("Failed to list commits: {}", e))
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError(
+                    "API error".into(),
+                )))
+                .attach_printable(format!("Failed to list commits: {}", e))
             })?;
 
         let first_commit = commits.items.first().ok_or_else(|| {
@@ -270,8 +278,10 @@ impl StorageBackend for GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                    .attach_printable(format!("Failed to update file: {}", e))
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError(
+                    "API error".into(),
+                )))
+                .attach_printable(format!("Failed to update file: {}", e))
             })?;
 
         let modified = commit
@@ -311,10 +321,10 @@ impl StorageBackend for GitHubStorage {
                     if source.status_code == http::StatusCode::NOT_FOUND {
                         StorageError::NotFound(format!("File not found: {}", path))
                     } else {
-                        StorageError::GitHub(GitHubStorageError::ApiError)
+                        StorageError::GitHub(GitHubStorageError::ApiError("API error".into()))
                     }
                 } else {
-                    StorageError::GitHub(GitHubStorageError::ApiError)
+                    StorageError::GitHub(GitHubStorageError::ApiError("API error".into()))
                 };
 
                 Report::new(storage_error).attach_printable(format!("Failed to get content: {}", e))
@@ -368,10 +378,10 @@ impl StorageBackend for GitHubStorage {
                     if source.status_code == http::StatusCode::NOT_FOUND {
                         StorageError::NotFound(format!("File not found: {}", path))
                     } else {
-                        StorageError::GitHub(GitHubStorageError::ApiError)
+                        StorageError::GitHub(GitHubStorageError::ApiError("API error".into()))
                     }
                 } else {
-                    StorageError::GitHub(GitHubStorageError::ApiError)
+                    StorageError::GitHub(GitHubStorageError::ApiError("API error".into()))
                 };
 
                 Report::new(storage_error).attach_printable(format!("Failed to get content: {}", e))
@@ -390,8 +400,10 @@ impl StorageBackend for GitHubStorage {
             .send()
             .await
             .map_err(|e| {
-                Report::new(StorageError::GitHub(GitHubStorageError::ApiError))
-                    .attach_printable(format!("Failed to delete file: {}", e))
+                Report::new(StorageError::GitHub(GitHubStorageError::ApiError(
+                    "API error".into(),
+                )))
+                .attach_printable(format!("Failed to delete file: {}", e))
             })?;
 
         Ok(())
@@ -416,11 +428,7 @@ impl StorageBackend for GitHubStorage {
 //         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
 
 //         let content = "Hello, world!";
-//         let result = gitbase.create_file("test.txt", content).await;
-//         match result {
-//             Ok(meta) => println!("meta: {:?}", meta),
-//             Err(e) => panic!("Error creating file: {}", e),
-//         }
+//         gitbase.create_file("test.txt", content).await.unwrap();
 //     }
 
 //     #[tokio::test]
@@ -428,32 +436,20 @@ impl StorageBackend for GitHubStorage {
 //         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
 
 //         let content = "Hello, world!";
-//         let result = gitbase.write("test.txt", content).await;
-//         match result {
-//             Ok(meta) => println!("meta: {:?}", meta),
-//             Err(e) => panic!("Error writing file: {}", e),
-//         }
+//         gitbase.write("test.txt", content).await.unwrap();
 //     }
 
 //     #[tokio::test]
 //     async fn test_read_file() {
 //         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
 
-//         let result = gitbase.read("test.txt").await;
-//         match result {
-//             Ok(content) => println!("content: {}", content),
-//             Err(e) => panic!("Error reading file: {}", e),
-//         }
+//         gitbase.read("test.txt").await.unwrap();
 //     }
 
 //     #[tokio::test]
 //     async fn test_delete_file() {
 //         let gitbase = init_gitbase().expect("Failed to initialize GitHubStorage");
 
-//         let result = gitbase.delete("test.txt").await;
-//         match result {
-//             Ok(_) => println!("File deleted"),
-//             Err(e) => panic!("Error deleting file: {}", e),
-//         }
+//         gitbase.delete("test.txt").await.unwrap();
 //     }
 // }
